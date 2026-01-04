@@ -13,7 +13,6 @@ SESSION_DIR = os.getenv("SESSION_DIR", "/data")
 STATE_PATH = os.path.join(SESSION_DIR, "storage_state.json")
 
 LINKBUILDER_URL = "https://www.mercadolivre.com.br/afiliados/linkbuilder#hub"
-
 MAX_BATCH = 30
 
 # ---- Selectors ----
@@ -29,10 +28,10 @@ class ConvertRequest(BaseModel):
     batch_size: int = 30
     sleep_seconds: float = 1.0
 
-# NOVA ROTA: Para o Easypanel saber que a API está viva
+# --- ESTA ROTA É ESSENCIAL PARA O EASYPANEL ---
 @app.get("/")
 def home():
-    return {"message": "MELI Scraper API is running!"}
+    return {"status": "online", "message": "MELI API is ready"}
 
 @app.get("/health")
 def health():
@@ -46,17 +45,15 @@ def ensure_session_exists():
     if not os.path.exists(STATE_PATH):
         raise HTTPException(
             status_code=412,
-            detail="Sem sessão salva. Gere e envie o arquivo storage_state.json para /data."
+            detail="Sem sessão salva. Verifique a pasta /data."
         )
 
 async def build_links(batch_links: List[str], link_type: str) -> str:
     ensure_session_exists()
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(storage_state=STATE_PATH)
         page = await context.new_page()
-
         await page.goto(LINKBUILDER_URL, timeout=60000)
 
         if link_type == "completo":
@@ -68,14 +65,12 @@ async def build_links(batch_links: List[str], link_type: str) -> str:
         await page.click(BTN_GERAR)
         await page.wait_for_selector(OUTPUT_LINK, timeout=60000)
         affiliate_link = await page.input_value(OUTPUT_LINK)
-
         await browser.close()
         return affiliate_link
 
 @app.post("/convert")
 async def convert(req: ConvertRequest, x_api_key: Optional[str] = Header(None)):
     check_key(x_api_key)
-
     batch_size = max(1, min(req.batch_size, MAX_BATCH))
     results = []
     failed = []
@@ -84,14 +79,9 @@ async def convert(req: ConvertRequest, x_api_key: Optional[str] = Header(None)):
         batch = req.links[i:i + batch_size]
         try:
             out = await build_links(batch, req.link_type)
-            results.append({
-                "batch_index": i // batch_size,
-                "input_count": len(batch),
-                "affiliate_output": out
-            })
+            results.append({"batch_index": i // batch_size, "affiliate_output": out})
         except Exception as e:
             failed.append({"batch_index": i // batch_size, "error": str(e)})
-
         if i + batch_size < len(req.links):
             await asyncio.sleep(req.sleep_seconds)
 
