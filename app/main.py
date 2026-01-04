@@ -40,6 +40,10 @@ def ensure_session_exists():
             detail="Sem sessão salva. Gere e envie o arquivo storage_state.json para /data."
         )
 
+@app.get("/")
+def read_root():
+    return {"status": "online", "message": "MELI Scraper API"}
+
 @app.get("/health")
 def health():
     return {"ok": True, "has_session": os.path.exists(STATE_PATH)}
@@ -98,5 +102,6 @@ async def convert(req: ConvertRequest, x_api_key: Optional[str] = Header(None)):
 
         if i + batch_size < len(req.links):
             await asyncio.sleep(req.sleep_seconds)
+            
 
     return {"total": len(req.links), "batches": results, "failed": failed}
