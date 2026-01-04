@@ -16,18 +16,27 @@ LINKBUILDER_URL = "https://www.mercadolivre.com.br/afiliados/linkbuilder#hub"
 
 MAX_BATCH = 30
 
-# ---- Selectors (mais estáveis que XPATH absoluto) ----
+# ---- Selectors ----
 INPUT_URLS = "textarea#url-0"
 BTN_GERAR = "button:has-text('Gerar')"
-OUTPUT_LINK = "textarea#textfield-copyLink-1"   # onde aparece o link curto no print
+OUTPUT_LINK = "textarea#textfield-copyLink-1"
 RADIO_CURTO = "label:has-text('Link curto')"
 RADIO_COMPLETO = "label:has-text('Link completo')"
 
 class ConvertRequest(BaseModel):
     links: List[str]
-    link_type: str = "curto"       # "curto" ou "completo"
+    link_type: str = "curto"
     batch_size: int = 30
     sleep_seconds: float = 1.0
+
+# NOVA ROTA: Para o Easypanel saber que a API está viva
+@app.get("/")
+def home():
+    return {"message": "MELI Scraper API is running!"}
+
+@app.get("/health")
+def health():
+    return {"ok": True, "has_session": os.path.exists(STATE_PATH)}
 
 def check_key(x_api_key: Optional[str]):
     if API_KEY and x_api_key != API_KEY:
@@ -40,14 +49,6 @@ def ensure_session_exists():
             detail="Sem sessão salva. Gere e envie o arquivo storage_state.json para /data."
         )
 
-@app.get("/")
-def read_root():
-    return {"status": "online", "message": "MELI Scraper API"}
-
-@app.get("/health")
-def health():
-    return {"ok": True, "has_session": os.path.exists(STATE_PATH)}
-
 async def build_links(batch_links: List[str], link_type: str) -> str:
     ensure_session_exists()
 
@@ -58,19 +59,13 @@ async def build_links(batch_links: List[str], link_type: str) -> str:
 
         await page.goto(LINKBUILDER_URL, timeout=60000)
 
-        # Seleciona tipo de link
         if link_type == "completo":
             await page.click(RADIO_COMPLETO)
         else:
             await page.click(RADIO_CURTO)
 
-        # Cola URLs (1 por linha)
         await page.fill(INPUT_URLS, "\n".join(batch_links))
-
-        # Clica em Gerar
         await page.click(BTN_GERAR)
-
-        # Espera o campo de saída aparecer e pega o valor
         await page.wait_for_selector(OUTPUT_LINK, timeout=60000)
         affiliate_link = await page.input_value(OUTPUT_LINK)
 
@@ -85,9 +80,6 @@ async def convert(req: ConvertRequest, x_api_key: Optional[str] = Header(None)):
     results = []
     failed = []
 
-    # O MELI parece retornar 1 link por execução (mesmo com 1 URL).
-    # Se você mandar 30 URLs, pode voltar uma lista/área diferente.
-    # Aqui eu retorno o output por batch e a gente ajusta se o MELI devolver múltiplos.
     for i in range(0, len(req.links), batch_size):
         batch = req.links[i:i + batch_size]
         try:
@@ -102,6 +94,5 @@ async def convert(req: ConvertRequest, x_api_key: Optional[str] = Header(None)):
 
         if i + batch_size < len(req.links):
             await asyncio.sleep(req.sleep_seconds)
-            
 
     return {"total": len(req.links), "batches": results, "failed": failed}
